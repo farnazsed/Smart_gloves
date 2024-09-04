@@ -1,0 +1,170 @@
+import serial
+import time
+import matplotlib.pyplot as plt
+import csv
+import os
+import datetime
+import pandas as pd
+
+class SmartGloveApp:
+    def __init__(self):
+        self.csv_text = "time(s),thumb_finger,index_finger,middle_finger,ring_finger,little_finger\n"
+        self.start_log = False
+        self.command_bytes = bytearray(16)  # Ensure bytearray has 16 elements
+        self.command_is_ready = False
+        self.com_counter = 0
+
+        self.thumb_finger_voltage = 0
+        self.index_finger_voltage = 0
+        self.middle_finger_voltage = 0
+        self.ring_finger_voltage = 0
+        self.little_finger_voltage = 0
+        self.time = 0
+
+        self.serial_port = serial.Serial()
+        self.serial_port.baudrate = 9600
+        self.serial_port.timeout = 1
+
+        self.init_virtual_com_port()
+
+        # Initialize plot
+        self.fig, self.ax = plt.subplots()
+        self.thumb_line, = self.ax.plot([], [], label='Thumb Finger Voltage')
+        self.index_line, = self.ax.plot([], [], label='Index Finger Voltage')
+        self.middle_line, = self.ax.plot([], [], label='Middle Finger Voltage')
+        self.ring_line, = self.ax.plot([], [], label='Ring Finger Voltage')
+        self.little_line, = self.ax.plot([], [], label='Little Finger Voltage')
+        self.ax.legend()
+        self.ax.set_xlim(0, 10)
+        self.ax.set_ylim(0, 3.3)
+
+        self.thumb_data = []
+        self.index_data = []
+        self.middle_data = []
+        self.ring_data = []
+        self.little_data = []
+        self.time_data = []
+
+    def init_virtual_com_port(self):
+        self.serial_port.port = 'COM5'  # Replace 'COM3' with your actual COM port
+        self.serial_port.open()
+
+    def calculate_checksum(self, data_bytes):
+        return sum(data_bytes[:-1]) & 0xFF
+
+    def send_no_operation_command(self):
+        self.command_bytes[0] = 0x01
+        self.command_bytes[1] = self.com_counter % 256  # Ensure com_counter is within byte range
+        self.command_bytes[2:15] = [0x00] * 13  # Correct assignment within the bytearray
+        self.command_bytes[15] = self.calculate_checksum(self.command_bytes)
+        self.serial_port.write(self.command_bytes)
+
+    def read_data(self):
+        if self.serial_port.in_waiting >= 16:
+            rx_bytes = self.serial_port.read(16)
+            self.time += 0.001
+            self.show_received_bytes(rx_bytes)
+            self.graph_rx_data()
+            if self.start_log:
+                self.csv_text += f"{self.time},{self.thumb_finger_voltage},{self.index_finger_voltage},{self.middle_finger_voltage},{self.ring_finger_voltage},{self.little_finger_voltage}\n"
+
+    def show_received_bytes(self, rx_bytes):
+        thumb_finger = (rx_bytes[2] << 8) + rx_bytes[1]
+        self.thumb_finger_voltage = (thumb_finger * 3.3) / 4096
+
+        index_finger = (rx_bytes[4] << 8) + rx_bytes[3]
+        self.index_finger_voltage = (index_finger * 3.3) / 4096
+
+        middle_finger = (rx_bytes[6] << 8) + rx_bytes[5]
+        self.middle_finger_voltage = (middle_finger * 3.3) / 4096
+
+        ring_finger = (rx_bytes[10] << 8) + rx_bytes[9]
+        self.ring_finger_voltage = (ring_finger * 3.3) / 4096
+
+        little_finger = (rx_bytes[12] << 8) + rx_bytes[11]
+        self.little_finger_voltage = (little_finger * 3.3) / 4096
+
+        print(f"thumb_finger_voltage: {self.thumb_finger_voltage:.2f} V")
+        print(f"index_finger_voltage: {self.index_finger_voltage:.2f} V")
+        print(f"middle_finger_voltage: {self.middle_finger_voltage:.2f} V")
+        print(f"ring_finger_voltage: {self.ring_finger_voltage:.2f} V")
+        print(f"little_finger_voltage: {self.little_finger_voltage:.2f} V")
+
+    def graph_rx_data(self):
+        self.time_data.append(self.time)
+        self.thumb_data.append(self.thumb_finger_voltage)
+        self.index_data.append(self.index_finger_voltage)
+        self.middle_data.append(self.middle_finger_voltage)
+        self.ring_data.append(self.ring_finger_voltage)
+        self.little_data.append(self.little_finger_voltage)
+
+        self.thumb_line.set_data(self.time_data, self.thumb_data)
+        self.index_line.set_data(self.time_data, self.index_data)
+        self.middle_line.set_data(self.time_data, self.middle_data)
+        self.ring_line.set_data(self.time_data, self.ring_data)
+        self.little_line.set_data(self.time_data, self.little_data)
+
+        if self.time > self.ax.get_xlim()[1]:
+            self.ax.set_xlim(self.ax.get_xlim()[0] + 5, self.ax.get_xlim()[1] + 5)
+
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+
+    def start_logging(self):
+        self.csv_text = "time(s),thumb_finger,index_finger,middle_finger,ring_finger,little_finger\n"
+        self.start_log = True
+
+    import datetime  # Add this import at the top of your code
+
+    def stop_logging(self):
+        self.start_log = False
+        current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name = f"log_{current_time}.csv"
+        with open(os.path.join(os.getcwd(), file_name), 'w') as file:
+            file.write(self.csv_text)
+
+    def main_loop(self):
+        self.start_logging()  # Start logging at the beginning
+        plt.ion()
+        while True:
+            self.com_counter += 1
+            if not self.command_is_ready:
+                self.send_no_operation_command()
+            else:
+                self.command_is_ready = False
+
+            self.read_data()
+            time.sleep(0.01)
+
+def plot_csv(file_name):
+    # Read the CSV file
+    data = pd.read_csv(file_name)
+
+    # Plot each column
+    plt.figure(figsize=(10, 6))
+    plt.plot(data['time(s)'], data['thumb_finger'], label='Thumb Finger Voltage')
+    plt.plot(data['time(s)'], data['index_finger'], label='Index Finger Voltage')
+    plt.plot(data['time(s)'], data['middle_finger'], label='Middle Finger Voltage')
+    plt.plot(data['time(s)'], data['ring_finger'], label='Ring Finger Voltage')
+    plt.plot(data['time(s)'], data['little_finger'], label='Little Finger Voltage')
+
+    # Customize the plot
+    plt.xlabel('Time (s)')
+    plt.ylabel('Voltage (V)')
+    plt.title('Finger Voltages Over Time')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
+if __name__ == "__main__":
+    app = SmartGloveApp()
+    try:
+        app.main_loop()
+    except KeyboardInterrupt:
+        app.stop_logging()
+        print("Logging stopped and data saved.")
+
+
+        plot_csv("log_20240806_121958.csv")
+
