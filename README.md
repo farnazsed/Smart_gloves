@@ -1,1 +1,2 @@
 # Smart_gloves
+We have recorded voltage signals from five TENG-based sensors attached to each finger using an ARM microprocessor. Moving forward, we will collect data from various individuals to build a dataset. This data will be used to train machine learning models capable of accurately predicting hand gestures based on the sensor readings. Ultimately, our goal is to integrate this system into a robotic platform that can mimic the predicted hand gestures in real-time.
